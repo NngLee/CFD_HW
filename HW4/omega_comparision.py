@@ -52,6 +52,8 @@ for omega in omegas:
     print(f"ω={omega}: {iterations}次迭代")
 
 # 绘制收敛曲线
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 微软雅黑
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 plt.figure(figsize=(8, 4))
 plt.plot(omegas, iterations_list, 'bo-', markersize=8)
 plt.xlabel("Relaxation Factor (ω)", fontsize=12)
