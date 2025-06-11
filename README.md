@@ -30,7 +30,7 @@ deadline：2025.5.2
 1. 数值求解绘制流线图
 2. 比较经典算例，如中心线上速度剖面，主涡涡心位置，角附近二次涡位置，三次涡的位置
    结果呈现：
-![image]"D:\学习资料\大三下\计算流体力学\CFD_HW\HW5\StreamlinePlot.png"
+![image]".\HW5\StreamlinePlot.png"
    
 deadline：2025.5.22
 ***
