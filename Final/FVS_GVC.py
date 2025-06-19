@@ -220,5 +220,5 @@ if __name__ == "__main__":
     gamma = 1.4             # 流体绝热指数
     t_total = 0.5           # 模拟总时长
     CFL = 0.8               # CFL数
-    xmin, xmax = -2, 2      # 计算域
+    xmin, xmax = -4, 4      # 计算域
     main()

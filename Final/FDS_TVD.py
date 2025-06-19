@@ -185,7 +185,7 @@ def main():
     plot_results(
         x, rho_num, u_num, p_num,
         x_exact, exact_rho, exact_u, exact_p,
-        title="FDS + TVD"
+        title=f"FDS-TVD N={num}"
     )
 
 if __name__ == "__main__":
