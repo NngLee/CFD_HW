@@ -78,35 +78,57 @@ def FDS_roe(UL, UR):
     F_roe = 0.5 * (F_L + F_R) - 0.5 * diss_vector
 
     return F_roe
-# Minmod限制器
-def minmod(v, limiter='minmod'):
+def GVC(v, direction='plus'):
     n = len(v)
-    vL = np.zeros_like(v)  # 左界面重构值
-    vR = np.zeros_like(v)  # 右界面重构值
+    v_recon = np.zeros_like(v)
+    eps = 1e-12  # 防止除零的小常数
     
-    # 边界点处理（采用一阶重构，直接取原值）
-    vL[0] = v[0]
-    vR[0] = v[0]
-    vL[-1] = v[-1]
-    vR[-1] = v[-1]
-    
-    for i in range(1, n-1):
-        # 计算左右两侧的斜率
-        deltaL = v[i] - v[i-1]  # 左侧斜率
-        deltaR = v[i+1] - v[i]  # 右侧斜率
+    for i in range(n):
+        # 边界处理（简单的一阶外推）
+        if i == 0:
+            # 左边界处理
+            if n > 1:
+                v_recon[i] = v[i] - 0.5 * (v[i+1] - v[i])
+            else:
+                v_recon[i] = v[i]
+            continue
+        elif i == n-1:
+            # 右边界处理
+            if n > 1:
+                v_recon[i] = v[i] + 0.5 * (v[i] - v[i-1])
+            else:
+                v_recon[i] = v[i]
+            continue
         
-        # 应用minmod限制器
-        if deltaL * deltaR <= 0:
-            slope = 0  # 斜率异号，取0，防止产生新极值
+        # 计算梯度比 r
+        if direction == 'plus':
+            # 右界面重构 (i+1/2)
+            numerator = v[i] - v[i-1]
+            denominator = v[i+1] - v[i]
+        else:  # direction == 'minus'
+            # 左界面重构 (i-1/2)
+            numerator = v[i] - v[i+1]
+            denominator = v[i-1] - v[i]
+        
+        # 防止除零
+        if np.abs(denominator) < eps:
+            r = 0.0
         else:
-            # 取绝对值较小的斜率，保持单调性
-            slope = np.sign(deltaL) * min(abs(deltaL), abs(deltaR))
+            r = numerator / denominator
         
-        # 计算左右界面的重构值
-        vL[i] = v[i] - 0.5 * slope
-        vR[i] = v[i] + 0.5 * slope
+        # GVC限制器函数
+        if np.abs(r) > 1:
+            phi = 1.0
+        else:
+            phi = r
+        
+        # 重构界面值
+        if direction == 'plus':
+            v_recon[i] = v[i] + phi * (v[i+1] - v[i]) / 2
+        else:  # direction == 'minus'
+            v_recon[i] = v[i] - phi * (v[i] - v[i-1]) / 2
     
-    return vL, vR
+    return v_recon
 
 # 三阶Runge-Kutta时间推进
 def RK3_step(U, dt, f):
@@ -136,18 +158,24 @@ def main():
         dt = CFL * dx / max_speed
         dt = min(dt, t_total - t)  # 保证最后一步不超过总时间
 
-        # MUSCL-TVD方法进行变量重构
+            # 使用GVC重构
         UL_recon = np.zeros_like(U)
         UR_recon = np.zeros_like(U)
+        
+        # 对每个守恒变量分量分别进行GVC重构
+        for comp in range(3):
+            v = U[comp, :]
+            
+            # 重构左界面值 (i-1/2) - 使用minus方向
+            vL = GVC(v, direction='minus')
+            
+            # 重构右界面值 (i+1/2) - 使用plus方向
+            vR = GVC(v, direction='plus')
 
-        # 对每个守恒变量分量分别进行重构
-        for i in range(3):
-            v = U[i, :]
-            vL, vR = minmod(v)
-            UL_recon[i, :] = vL
-            UR_recon[i, :] = vR
-
-           # 计算通量（每个界面一个通量，共 nx+1 个）
+            UL_recon[comp, :] = vL
+            UR_recon[comp, :] = vR
+        
+        # 计算通量（每个界面一个通量，共 nx+1 个）
         F = np.zeros((3, num + 1))
         
         # 左边界
@@ -185,7 +213,7 @@ def main():
     plot_results(
         x, rho_num, u_num, p_num,
         x_exact, exact_rho, exact_u, exact_p,
-        title="FDS + TVD"
+        title="FDS + GVC"
     )
 
 if __name__ == "__main__":

@@ -187,7 +187,7 @@ def main():
 
 if __name__ == "__main__":
     # 参数
-    num = 500               # 网格数
+    num = 200               # 网格数
     gamma = 1.4             # 流体绝热指数
     t_total = 0.5           # 模拟总时长
     CFL = 0.8               # CFL数
