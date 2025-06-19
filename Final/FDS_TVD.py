@@ -18,49 +18,66 @@ def get_value(U):
     return rho, u, p
 
 
-# Van Leer通量向量分裂
-def FVS_Van_Leer(U):
+def FDS_roe(UL, UR):
+    # 提取左右状态的物理量
+    rhoL, uL, pL = get_value(UL)
+    rhoR, uR, pR = get_value(UR)
+    hL = (gamma/(gamma-1)) * pL/rhoL + 0.5*uL**2  # 左侧比焓
+    hR = (gamma/(gamma-1)) * pR/rhoR + 0.5*uR**2  # 右侧比焓
 
-    rho = U[0, :]                                           #密度
-    u = U[1, :] / rho                                       #速度
-    p = (gamma - 1) * (U[2, :] - 0.5 * rho * u**2)          #压强
-    a = np.sqrt(gamma * p / rho)                            #声速
-    M = u / a                                               #马赫数
-    
-    # 总通量
-    F = np.zeros_like(U)
-    F[0, :] = rho * u
-    F[1, :] = rho * u**2 + p
-    F[2, :] = u * (U[2, :] + p)  
+    sqrt_rhoL = np.sqrt(rhoL)
+    sqrt_rhoR = np.sqrt(rhoR)
 
-    F_plus = np.zeros_like(U)
-    F_minus = np.zeros_like(U)
-    
-    # Van_Leer分裂
-    for i in range(len(rho)):
+    # Roe平均
+    u_roe = (sqrt_rhoL * uL + sqrt_rhoR * uR) / (sqrt_rhoL + sqrt_rhoR)  # Roe平均速度
+    H_roe = (sqrt_rhoL * hL + sqrt_rhoR * hR) / (sqrt_rhoL + sqrt_rhoR)  # Roe平均总焓
+    a_roe = np.sqrt((gamma-1)*(H_roe - 0.5*u_roe**2))  # Roe平均声速
 
-        if M[i] >= 1:
-            F_plus[:, i] = F[:, i]
-            F_minus[:, i] = 0.0
-        
-        elif abs(M[i]) < 1:
-            # 正通量分量
-            factor_plus = rho[i] * a[i] * (M[i] + 1)**2 / 4.0
-            F_plus[0, i] = factor_plus
-            F_plus[1, i] = factor_plus * (2 * a[i] / gamma + u[i] * (gamma - 1) / gamma)
-            F_plus[2, i] = factor_plus * ((2 * a[i] / gamma + u[i] * (gamma - 1) / gamma)**2 / (2 * (gamma - 1)))
-            
-            # 负通量分量
-            factor_minus = -rho[i] * a[i] * (M[i] - 1)**2 / 4.0
-            F_minus[0, i] = factor_minus
-            F_minus[1, i] = factor_minus * (-2 * a[i] / gamma + u[i] * (gamma - 1) / gamma)
-            F_minus[2, i] = factor_minus * ((-2 * a[i] / gamma + u[i] * (gamma - 1) / gamma)**2 / (2 * (gamma - 1)))
-        
-        else:  
-            F_plus[:, i] = 0.0
-            F_minus[:, i] = F[:, i]
-    return F_plus, F_minus
+    # 计算特征速度
+    lambda1 = u_roe - a_roe  # 左行声波特征速度
+    lambda2 = u_roe          # 中间熵波特征速度
+    lambda3 = u_roe + a_roe  # 右行声波特征速度
 
+    # 熵修正，避免特征值为零
+    eps = 1e-6
+    lambda1 = np.where(np.abs(lambda1) < eps, (lambda1**2 + eps**2)/(2*eps), lambda1)
+    lambda3 = np.where(np.abs(lambda3) < eps, (lambda3**2 + eps**2)/(2*eps), lambda3)
+
+    lambda_abs = np.array([np.abs(lambda1), np.abs(lambda2), np.abs(lambda3)])  # 特征值绝对值
+
+    # 通量差分
+    delta_U = UR - UL
+
+    # 右特征向量矩阵
+    R = np.zeros((3, 3))
+    R[0, :] = [1, 1, 1]
+    R[1, :] = [u_roe - a_roe, u_roe, u_roe + a_roe]
+    R[2, :] = [H_roe - u_roe*a_roe, 0.5*u_roe**2, H_roe + u_roe*a_roe]
+
+    # 左特征向量矩阵
+    b1 = 0.5 * (gamma - 1) * u_roe**2 / a_roe**2
+    b2 = (gamma - 1) / a_roe**2
+
+    L = np.zeros((3, 3))
+    L[0, :] = [0.5*(b1 + u_roe/a_roe), -0.5*(b2*u_roe + 1/a_roe), 0.5*b2]
+    L[1, :] = [1 - b1, b2*u_roe, -b2]
+    L[2, :] = [0.5*(b1 - u_roe/a_roe), -0.5*(b2*u_roe - 1/a_roe), 0.5*b2]
+
+    # 波强度
+    alpha = L @ delta_U
+
+    # 耗散项
+    abs_lambda_alpha = lambda_abs * alpha
+    diss_vector = R @ abs_lambda_alpha
+
+    # 左右物理通量
+    F_L = np.array([rhoL*uL, rhoL*uL**2 + pL, uL*(UL[2] + pL)])
+    F_R = np.array([rhoR*uR, rhoR*uR**2 + pR, uR*(UR[2] + pR)])
+
+    # Roe格式数值通量
+    F_roe = 0.5 * (F_L + F_R) - 0.5 * diss_vector
+
+    return F_roe
 # Minmod限制器
 def minmod(v, limiter='minmod'):
     n = len(v)
@@ -130,34 +147,20 @@ def main():
             UL_recon[i, :] = vL
             UR_recon[i, :] = vR
 
-        # 计算每个单元界面的数值通量
+           # 计算通量（每个界面一个通量，共 nx+1 个）
         F = np.zeros((3, num + 1))
+        
+        # 左边界
+        F[:, 0] = FDS_roe(UL_recon[:, 0], UR_recon[:, 0])
 
-        # 计算内部界面通量
+        # 右边界
+        F[:, -1] = FDS_roe(UL_recon[:, -1], UR_recon[:, -1])
+
+        # 内部界面
         for i in range(1, num):
-            # 左单元右界面重构值
-            UL = UR_recon[:, i-1]
-            # 右单元左界面重构值
-            UR = UL_recon[:, i]
-
-            # 分别计算左右状态的通量分裂
-            F_plus_L, _ = FVS_Van_Leer(UL.reshape(3, 1))
-            _, F_minus_R = FVS_Van_Leer(UR.reshape(3, 1))
-
-            # FVS通量为左侧正分量加右侧负分量
-            F[:, i] = F_plus_L.flatten() + F_minus_R.flatten()
-
-        # 边界条件处理
-        # 左边界（i=0）
-        F_plus_L, _ = FVS_Van_Leer(U[:, 0].reshape(3, 1))
-        _, F_minus_R = FVS_Van_Leer(U[:, 0].reshape(3, 1))
-        F[:, 0] = F_plus_L.flatten() + F_minus_R.flatten()
-
-        # 右边界（i=nx）
-        F_plus_L, _ = FVS_Van_Leer(U[:, -1].reshape(3, 1))
-        _, F_minus_R = FVS_Van_Leer(U[:, -1].reshape(3, 1))
-        F[:, -1] = F_plus_L.flatten() + F_minus_R.flatten()
-
+            left_state = UR_recon[:, i - 1]  # 左单元的右界面值
+            right_state = UL_recon[:, i]     # 右单元的左界面值
+            F[:, i] = FDS_roe(left_state, right_state)
         # 计算通量差分
         dF = (F[:, 1:] - F[:, :-1]) / dx
 
@@ -182,7 +185,7 @@ def main():
     plot_results(
         x, rho_num, u_num, p_num,
         x_exact, exact_rho, exact_u, exact_p,
-        title="FVS + TVD"
+        title="FDS + TVD"
     )
 
 if __name__ == "__main__":
@@ -191,5 +194,5 @@ if __name__ == "__main__":
     gamma = 1.4             # 流体绝热指数
     t_total = 0.5           # 模拟总时长
     CFL = 0.8               # CFL数
-    xmin, xmax = -1, 1     # 计算域
+    xmin, xmax = -2, 2      # 计算域
     main()
