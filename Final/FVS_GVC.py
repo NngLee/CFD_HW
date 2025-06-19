@@ -211,7 +211,7 @@ def main():
     plot_results(
         x, rho_num, u_num, p_num,
         x_exact, exact_rho, exact_u, exact_p,
-        title="FVS + TVD"
+        title="FVS + GVC"
     )
 
 if __name__ == "__main__":
